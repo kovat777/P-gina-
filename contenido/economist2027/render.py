@@ -251,7 +251,10 @@ def panel_img(box, angle, extra=1.0):
     m = s * 0.08  # margen para rotar sin esquinas vacías
     src = tuple(v * UP for v in (x + PAD - m, y + PAD - m, x + PAD + s + m, y + PAD + s + m))
     side = int(PANEL * (1 + 0.16))
-    im = big.resize((side, side), Image.BICUBIC, box=src)
+    if min(src) < 0 or src[2] > big.width or src[3] > big.height:
+        im = big.crop(tuple(int(v) for v in src)).resize((side, side), Image.BICUBIC)
+    else:
+        im = big.resize((side, side), Image.BICUBIC, box=src)
     if abs(angle) > 0.01:
         im = im.rotate(angle, Image.BICUBIC)
     o = (side - PANEL) // 2
@@ -264,8 +267,8 @@ def background(box, t):
     hh = s * 2 * 2.6 * (1 + 0.05 * math.sin(t * 0.4))
     ww = hh * W / H
     cx += math.sin(t * 0.5) * ww * 0.05
-    return bgsrc.resize((W // 2, H // 2), Image.BILINEAR,
-                        box=(cx - ww / 2, cy - hh / 2, cx + ww / 2, cy + hh / 2)).resize((W, H), Image.BILINEAR)
+    b = tuple(int(v) for v in (cx - ww / 2, cy - hh / 2, cx + ww / 2, cy + hh / 2))
+    return bgsrc.crop(b).resize((W // 2, H // 2), Image.BILINEAR).resize((W, H), Image.BILINEAR)
 
 
 def glitch(im, amt):
@@ -319,7 +322,7 @@ def render_scene(i):
     ff = subprocess.Popen([
         "ffmpeg", "-y", "-loglevel", "error",
         "-f", "rawvideo", "-pix_fmt", "rgb24", "-s", f"{W}x{H}", "-r", str(FPS), "-i", "-",
-        "-vf", "noise=alls=9:allf=t,vignette=PI/4.5",
+        "-vf", "noise=alls=5:allf=t,vignette=PI/4.5",
         "-c:v", "libx264", "-preset", "veryfast", "-crf", "22", "-pix_fmt", "yuv420p", seg,
     ], stdin=subprocess.PIPE)
 
@@ -435,6 +438,8 @@ if __name__ == "__main__":
     _init(tl, st, tot)
     # escenas largas primero para repartir mejor la carga
     order = sorted(range(len(ESCENAS)), key=lambda k: -tl[k][1])
+    if os.environ.get("ONLY"):  # volver a renderizar solo algunas escenas
+        order = [int(k) for k in os.environ["ONLY"].split(",")]
     with Pool(os.cpu_count(), initializer=_init, initargs=(tl, st, tot)) as pool:
         pool.map(render_scene, order, chunksize=1)
     lst = os.path.join(TMP, "lista.txt")
@@ -442,6 +447,8 @@ if __name__ == "__main__":
         for i in range(len(ESCENAS)):
             fh.write(f"file 'seg{i:02d}.mp4'\n")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", lst,
-                    "-i", os.path.join(TMP, "mix.wav"), "-c:v", "copy", "-c:a", "aac", "-b:a", "160k",
+                    "-i", os.path.join(TMP, "mix.wav"),
+                    "-vf", "hqdn3d=3:2:5:5,noise=alls=4:allf=t", "-c:v", "libx264", "-preset", "medium",
+                    "-crf", "27", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "160k",
                     "-shortest", "-movflags", "+faststart", OUT], check=True)
     print("OK", OUT, f"{tot:.1f}s")
