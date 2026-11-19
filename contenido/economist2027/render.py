@@ -51,13 +51,16 @@ def say_text(s):
 
 
 def tts(text, path):
+    out = path.replace(".wav", "_n.wav")
+    if os.path.exists(out):  # la voz varía en cada síntesis: reutilizar la ya generada
+        with wave.open(out) as w:
+            return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
     # voz neuronal Piper, sin cambiar el tono para no deformarla
     subprocess.run([sys.executable, "-m", "piper", "-m", VOICE + ".onnx",
                     "-c", VOICE + ".onnx.json", "--length-scale", "1.06",
                     "--sentence-silence", "0.25", "-f", path],
                    input=say_text(text).encode(), check=True,
                    stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-    out = path.replace(".wav", "_n.wav")
     fx = "highpass=f=70,equalizer=f=180:t=q:w=1.2:g=2.5,aecho=0.9:0.9:45:0.10,volume=0.9"
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-ac", "1",
                     "-af", fx, "-ar", str(SR), out], check=True)
@@ -438,7 +441,15 @@ if __name__ == "__main__":
     _init(tl, st, tot)
     # escenas largas primero para repartir mejor la carga
     order = sorted(range(len(ESCENAS)), key=lambda k: -tl[k][1])
-    if os.environ.get("ONLY"):  # volver a renderizar solo algunas escenas
+    if os.environ.get("ONLY") == "auto":  # solo escenas que faltan o no cuadran con el audio
+        def frames(k):
+            r = subprocess.run(["ffprobe", "-v", "error", "-count_frames", "-select_streams", "v",
+                                "-show_entries", "stream=nb_read_frames", "-of", "csv=p=0",
+                                os.path.join(TMP, f"seg{k:02d}.mp4")], capture_output=True, text=True)
+            return r.stdout.strip()
+        order = [k for k in order if frames(k) != str(int(round(tl[k][1] * FPS)))]
+        print("re-render:", order, flush=True)
+    elif os.environ.get("ONLY"):  # volver a renderizar solo algunas escenas
         order = [int(k) for k in os.environ["ONLY"].split(",")]
     with Pool(os.cpu_count(), initializer=_init, initargs=(tl, st, tot)) as pool:
         pool.map(render_scene, order, chunksize=1)
