@@ -41,13 +41,17 @@ def say_text(s):
 
 
 def tts(text, path):
-    subprocess.run(["espeak-ng", "-v", "mb-mx2", "-s", "168", "-p", "45",
+    subprocess.run(["espeak-ng", "-v", "mb-mx2", "-s", "158", "-p", "18",
                     "-w", path, say_text(text)], check=True,
                    stderr=subprocess.DEVNULL)
-    # normaliza a mono 22050 Hz
+    # voz de thriller: más grave y pausada, cuerpo en graves, eco de sala y compresión
     out = path.replace(".wav", "_n.wav")
+    fx = (f"aresample={SR},asetrate={SR}*0.84,aresample={SR},atempo=1.07,"
+          "highpass=f=55,equalizer=f=140:t=q:w=1:g=5,equalizer=f=3200:t=q:w=1:g=-3,"
+          "aecho=0.8:0.55:80|160|260:0.22|0.13|0.07,"
+          "acompressor=threshold=-20dB:ratio=3:attack=5:release=120")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-ac", "1",
-                    "-ar", str(SR), out], check=True)
+                    "-af", fx, "-ar", str(SR), out], check=True)
     with wave.open(out) as w:
         a = np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16)
     return a.astype(np.float32) / 32768.0
@@ -132,7 +136,7 @@ def panel_at(b0, b1, t):
 
 
 # ---------- audio por escena ----------
-GAP, HEAD, TAIL = 0.22, 0.35, 0.55
+GAP, HEAD, TAIL = 0.42, 0.7, 0.8
 timeline = []  # (escena, [(inicio, fin, texto)], duración)
 voice_parts = []
 for i, sc in enumerate(ESCENAS):
@@ -154,19 +158,46 @@ for i, sc in enumerate(ESCENAS):
 voice = np.concatenate(voice_parts)
 total_s = len(voice) / SR
 
-# música de fondo: pad grave + pulso suave (generada, sin derechos)
+# banda sonora de suspenso (generada, sin derechos):
+# dron grave disonante + latido de corazón + tono agudo inquietante + golpe en cada escena
 tt = np.arange(len(voice)) / SR
-chords = [(55.0, 82.41, 130.81), (49.0, 73.42, 116.54), (43.65, 65.41, 103.83), (46.25, 69.3, 110.0)]
-music = np.zeros_like(voice)
-for k, ch in enumerate(chords):
-    mask = ((tt // 8).astype(int) % len(chords)) == k
-    for f0 in ch:
-        music += mask * (np.sin(2 * np.pi * f0 * tt) + 0.3 * np.sin(2 * np.pi * 2 * f0 * tt))
-music *= 0.5 + 0.5 * np.sin(2 * np.pi * tt / 8 - np.pi / 2) ** 2
-pulse = np.exp(-((tt % 1.0) * 9)) * np.sin(2 * np.pi * 41.2 * tt)
-music = music / np.max(np.abs(music)) * 0.07 + pulse * 0.05
-fade = np.minimum(1, np.minimum(tt / 2, (total_s - tt) / 3))
-mix = voice / max(1e-6, np.max(np.abs(voice))) * 0.85 + music * fade
+rng = np.random.default_rng(7)
+TWO_PI = 2 * np.pi
+
+drone = np.zeros_like(voice)
+for f0, g in ((36.71, 1.0), (73.42, 0.6), (77.78, 0.35), (110.0, 0.25), (155.56, 0.12)):
+    drone += g * np.sin(TWO_PI * f0 * tt + 0.8 * np.sin(TWO_PI * 0.07 * tt))
+drone *= 0.65 + 0.35 * np.sin(TWO_PI * tt / 11) ** 2
+drone /= np.max(np.abs(drone))
+
+# latido (lub-dub) a ~58 ppm
+beat = np.zeros_like(voice)
+period = 60 / 58
+ph = tt % period
+for off, amp in ((0.0, 1.0), (0.22, 0.65)):
+    x = ph - off
+    env = np.where(x >= 0, np.exp(-np.clip(x, 0, None) * 22), 0)
+    beat += amp * env * np.sin(TWO_PI * 52 * tt)
+
+# tono agudo que oscila apenas desafinado
+eerie = (np.sin(TWO_PI * 987.8 * tt) + np.sin(TWO_PI * 991.3 * tt)) * 0.5
+eerie *= (0.5 + 0.5 * np.sin(TWO_PI * tt / 17)) ** 3
+
+# golpe grave ("boom") + ráfaga de ruido al inicio de cada escena
+hits = np.zeros_like(voice)
+starts = np.cumsum([0] + [d for _, _, d in timeline[:-1]])
+for s in starts:
+    i0 = int(s * SR)
+    n = min(int(2.5 * SR), len(hits) - i0)
+    x = np.arange(n) / SR
+    f = 30 + 45 * np.exp(-x * 6)
+    boom = np.sin(TWO_PI * np.cumsum(f) / SR) * np.exp(-x * 1.8)
+    noise = rng.standard_normal(n) * np.exp(-x * 9) * 0.25
+    hits[i0:i0 + n] += boom + noise
+
+music = drone * 0.075 + beat * 0.11 + eerie * 0.012 + hits * 0.16
+fade = np.minimum(1, np.minimum(tt / 2, (total_s - tt) / 4))
+mix = voice / max(1e-6, np.max(np.abs(voice))) * 0.82 + music * fade
 mix = np.clip(mix, -1, 1)
 with wave.open(os.path.join(TMP, "mix.wav"), "wb") as w:
     w.setnchannels(1)
