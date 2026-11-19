@@ -1,8 +1,8 @@
 # The Economist · The World Ahead 2027: la portada, descifrada
 
-Video: `videos/economist-2027-portada-descifrada.mp4` (vertical 1080×1920, ~5:18, voz en español).
+Video: `videos/economist-2027-portada-descifrada.mp4` (vertical 1080×1920, ~7:44, voz neuronal Piper es_MX-ald y música de suspenso).
 
-Para volver a generarlo: `python3 contenido/economist2027/render.py <portada.png> <salida.mp4> <carpeta_tmp>` (necesita ffmpeg, espeak-ng y la voz MBROLA `mx2`).
+Para volver a generarlo: `python3 contenido/economist2027/render.py <portada.png> <salida.mp4> <carpeta_tmp>` y la ruta de la voz Piper como cuarto argumento (necesita ffmpeg y `pip install piper-tts`; voz `es_MX-ald-medium` de los releases de k2-fsa/sherpa-onnx).
 
 > Los símbolos marcados como *interpretación* son lectura propia: The Economist no publica qué significa cada icono.
 

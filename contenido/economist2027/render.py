@@ -1,7 +1,7 @@
 """Renderiza el video vertical (1080x1920) sobre la portada de The Economist 2027.
 
-Uso: python3 render.py <portada.png> <salida.mp4> <carpeta_temporal>
-Requiere: ffmpeg, espeak-ng con la voz MBROLA mx2, Pillow, numpy.
+Uso: python3 render.py <portada.png> <salida.mp4> <carpeta_temporal> <voz_piper_sin_ext>
+Requiere: ffmpeg, piper-tts (voz es_MX-ald-medium), Pillow, numpy.
 """
 import os
 import subprocess
@@ -15,6 +15,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from escenas import ESCENAS, PRONUNCIA  # noqa: E402
 
 COVER, OUT, TMP = sys.argv[1], sys.argv[2], sys.argv[3]
+# ruta al modelo Piper sin extensión, p. ej. .../es_MX-ald-medium
+VOICE = sys.argv[4]
 os.makedirs(TMP, exist_ok=True)
 
 W, H, FPS, SR = 1080, 1920, 30, 22050
@@ -41,15 +43,16 @@ def say_text(s):
 
 
 def tts(text, path):
-    subprocess.run(["espeak-ng", "-v", "mb-mx2", "-s", "158", "-p", "18",
-                    "-w", path, say_text(text)], check=True,
-                   stderr=subprocess.DEVNULL)
-    # voz de thriller: más grave y pausada, cuerpo en graves, eco de sala y compresión
+    # voz neuronal Piper (es_MX-ald), pausada; sin cambiar el tono para no deformarla
+    subprocess.run([sys.executable, "-m", "piper", "-m", VOICE + ".onnx",
+                    "-c", VOICE + ".onnx.json", "--length-scale", "1.15",
+                    "--sentence-silence", "0.35", "-f", path],
+                   input=say_text(text).encode(), check=True,
+                   stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    # solo un poco de cuerpo en graves y una reverberación muy suave
     out = path.replace(".wav", "_n.wav")
-    fx = (f"aresample={SR},asetrate={SR}*0.84,aresample={SR},atempo=1.07,"
-          "highpass=f=55,equalizer=f=140:t=q:w=1:g=5,equalizer=f=3200:t=q:w=1:g=-3,"
-          "aecho=0.8:0.55:80|160|260:0.22|0.13|0.07,"
-          "acompressor=threshold=-20dB:ratio=3:attack=5:release=120")
+    fx = ("highpass=f=70,equalizer=f=180:t=q:w=1.2:g=2.5,"
+          "aecho=0.9:0.9:45:0.10,volume=0.9")
     subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", path, "-ac", "1",
                     "-af", fx, "-ar", str(SR), out], check=True)
     with wave.open(out) as w:
@@ -164,41 +167,42 @@ tt = np.arange(len(voice)) / SR
 rng = np.random.default_rng(7)
 TWO_PI = 2 * np.pi
 
+# Todo en frecuencias que un parlante de celular reproduce sin distorsión (>= 90 Hz)
+# y con envolventes suaves (sin ataques bruscos que produzcan chasquidos).
+def smooth_env(x, attack, decay):
+    return np.where(x < 0, 0, np.minimum(1, x / attack) * np.exp(-np.clip(x - attack, 0, None) * decay))
+
+
+# pad oscuro en re menor con una segunda menor que crea tensión, entrando y saliendo lento
 drone = np.zeros_like(voice)
-for f0, g in ((36.71, 1.0), (73.42, 0.6), (77.78, 0.35), (110.0, 0.25), (155.56, 0.12)):
-    drone += g * np.sin(TWO_PI * f0 * tt + 0.8 * np.sin(TWO_PI * 0.07 * tt))
-drone *= 0.65 + 0.35 * np.sin(TWO_PI * tt / 11) ** 2
+for f0, g in ((146.83, 1.0), (174.61, 0.55), (220.0, 0.45), (155.56, 0.18)):
+    for det in (-0.6, 0.6):
+        drone += g * np.sin(TWO_PI * (f0 + det) * tt)
+drone *= 0.55 + 0.45 * np.sin(TWO_PI * tt / 12) ** 2
 drone /= np.max(np.abs(drone))
 
-# latido (lub-dub) a ~58 ppm
+# latido lento (lub-dub, ~56 ppm) en tono audible y redondeado
 beat = np.zeros_like(voice)
-period = 60 / 58
-ph = tt % period
-for off, amp in ((0.0, 1.0), (0.22, 0.65)):
-    x = ph - off
-    env = np.where(x >= 0, np.exp(-np.clip(x, 0, None) * 22), 0)
-    beat += amp * env * np.sin(TWO_PI * 52 * tt)
+ph = tt % (60 / 56)
+for off, amp in ((0.0, 1.0), (0.24, 0.6)):
+    beat += amp * smooth_env(ph - off, 0.012, 14) * np.sin(TWO_PI * 95 * tt)
 
-# tono agudo que oscila apenas desafinado
-eerie = (np.sin(TWO_PI * 987.8 * tt) + np.sin(TWO_PI * 991.3 * tt)) * 0.5
-eerie *= (0.5 + 0.5 * np.sin(TWO_PI * tt / 17)) ** 3
-
-# golpe grave ("boom") + ráfaga de ruido al inicio de cada escena
+# "whoosh" suave al cambiar de escena: ruido filtrado que crece y se apaga
 hits = np.zeros_like(voice)
 starts = np.cumsum([0] + [d for _, _, d in timeline[:-1]])
+kern = np.ones(40) / 40
 for s in starts:
-    i0 = int(s * SR)
-    n = min(int(2.5 * SR), len(hits) - i0)
+    i0 = int(max(0, s - 0.6) * SR)
+    n = min(int(1.6 * SR), len(hits) - i0)
     x = np.arange(n) / SR
-    f = 30 + 45 * np.exp(-x * 6)
-    boom = np.sin(TWO_PI * np.cumsum(f) / SR) * np.exp(-x * 1.8)
-    noise = rng.standard_normal(n) * np.exp(-x * 9) * 0.25
-    hits[i0:i0 + n] += boom + noise
+    noise = np.convolve(rng.standard_normal(n), kern, mode="same")
+    env = np.sin(np.pi * np.clip(x / 1.6, 0, 1)) ** 2
+    hits[i0:i0 + n] += noise * env / (np.max(np.abs(noise)) + 1e-9)
 
-music = drone * 0.075 + beat * 0.11 + eerie * 0.012 + hits * 0.16
+music = drone * 0.05 + beat * 0.07 + hits * 0.05
 fade = np.minimum(1, np.minimum(tt / 2, (total_s - tt) / 4))
-mix = voice / max(1e-6, np.max(np.abs(voice))) * 0.82 + music * fade
-mix = np.clip(mix, -1, 1)
+mix = voice / max(1e-6, np.max(np.abs(voice))) * 0.8 + music * fade
+mix = mix / max(1.0, np.max(np.abs(mix)) / 0.89)  # sin recortes
 with wave.open(os.path.join(TMP, "mix.wav"), "wb") as w:
     w.setnchannels(1)
     w.setsampwidth(2)
