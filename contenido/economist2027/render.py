@@ -1,6 +1,8 @@
 """Renderiza el video vertical (1080x1920) sobre la portada de The Economist 2027.
 
-Uso: python3 render.py <portada.png> <salida.mp4> <carpeta_temporal> <voz_piper_sin_ext>
+Uso: python3 render.py <portada.png> <salida.mp4> <carpeta_temporal> <voz>
+<voz> = modelo Piper sin extensión, o carpeta con audios ya generados <escena*10+frase>.wav
+(la versión publicada usa la voz "Juan" de Higgsfield, modelo seed_audio).
 Requiere: ffmpeg, piper-tts (voz es_MX-ald-medium), Pillow, numpy.
 
 Estilo dinámico: cámara en mano, zoom en cada frase, paneo por la portada,
@@ -50,8 +52,14 @@ def say_text(s):
     return s
 
 
-def tts(text, path):
+def tts(text, path, key=None):
     out = path.replace(".wav", "_n.wav")
+    if os.path.isdir(VOICE):  # voces ya generadas (p. ej. Higgsfield): <VOICE>/<key>.wav
+        if not os.path.exists(out):
+            subprocess.run(["ffmpeg", "-y", "-loglevel", "error", "-i", os.path.join(VOICE, f"{key}.wav"),
+                            "-ac", "1", "-af", "silenceremove=start_periods=1:start_threshold=-45dB,"
+                            "areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse,"
+                            "highpass=f=60", "-ar", str(SR), out], check=True)
     if os.path.exists(out):  # la voz varía en cada síntesis: reutilizar la ya generada
         with wave.open(out) as w:
             return np.frombuffer(w.readframes(w.getnframes()), dtype=np.int16).astype(np.float32) / 32768.0
@@ -135,7 +143,7 @@ def build_audio():
         chunks = []
         seg = [np.zeros(int(HEAD * SR), np.float32)]
         for j, line in enumerate(sc["lines"]):
-            a = tts(line, os.path.join(TMP, f"v{i:02d}_{j}.wav"))
+            a = tts(line, os.path.join(TMP, f"v{i:02d}_{j}.wav"), i * 10 + j)
             d = len(a) / SR
             chunks.append((t, t + d, t + d + GAP, line))
             seg += [a, np.zeros(int(GAP * SR), np.float32)]
