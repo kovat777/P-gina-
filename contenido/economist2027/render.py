@@ -132,6 +132,53 @@ def ease_out_cubic(t):
     return 1 - (1 - clamp(t)) ** 3
 
 
+def scene_audio(path, lines):
+    """Carga el audio de una escena y estima dónde empieza y termina cada frase,
+    eligiendo las pausas de la voz más cercanas al reparto proporcional por letras."""
+    raw = subprocess.run(["ffmpeg", "-loglevel", "error", "-i", path, "-ac", "1", "-ar", str(SR),
+                          "-af", "highpass=f=50", "-f", "s16le", "-"], capture_output=True, check=True).stdout
+    a = np.frombuffer(raw, np.int16).astype(np.float32) / 32768.0
+    hop = int(0.02 * SR)
+    rms = np.sqrt(np.convolve(a ** 2, np.ones(hop) / hop, mode="same"))[::hop]
+    thr = max(rms.max() * 0.06, 1e-4)
+    voiced = np.where(rms > thr)[0]
+    i0, i1 = max(0, voiced[0] - 3), min(len(rms), voiced[-1] + 6)
+    a = a[i0 * hop:i1 * hop]
+    rms = rms[i0:i1]
+    total = len(a) / SR
+    # pausas (>= 0.14 s por debajo del umbral)
+    gaps, k = [], 0
+    while k < len(rms):
+        if rms[k] <= thr:
+            j = k
+            while j < len(rms) and rms[j] <= thr:
+                j += 1
+            if (j - k) * 0.02 >= 0.14 and k > 0 and j < len(rms):
+                gaps.append((k * 0.02, j * 0.02))
+            k = j
+        else:
+            k += 1
+    lens = [len(x) for x in lines]
+    cum = np.cumsum(lens)[:-1] / sum(lens) * total
+    bounds, last = [], 0.0
+    for target in cum:
+        cands = [g for g in gaps if g[0] > last + 0.3]
+        if cands:
+            g = min(cands, key=lambda g: abs((g[0] + g[1]) / 2 - target))
+            if abs((g[0] + g[1]) / 2 - target) > 2.5:
+                g = (target, target)
+        else:
+            g = (target, target)
+        bounds.append(g)
+        last = g[1]
+    spans, start = [], 0.0
+    for g in bounds:
+        spans.append((start, g[0]))
+        start = g[1]
+    spans.append((start, total))
+    return a, spans
+
+
 # ====================== AUDIO Y LÍNEA DE TIEMPO ======================
 GAP, HEAD, TAIL = 0.3, 0.55, 0.5
 
@@ -142,6 +189,24 @@ def build_audio():
         t = HEAD
         chunks = []
         seg = [np.zeros(int(HEAD * SR), np.float32)]
+        scene_file = os.path.join(VOICE, f"s{i:02d}.mp3") if os.path.isdir(VOICE) else ""
+        if scene_file and os.path.exists(scene_file):
+            # un audio por escena (ElevenLabs): las frases se ubican en las pausas de la voz
+            a, spans = scene_audio(scene_file, sc["lines"])
+            for (s0, s1), line in zip(spans, sc["lines"]):
+                chunks.append((t + s0, t + s1, t + s1, line))
+            seg += [a]
+            t += len(a) / SR
+            if chunks:
+                chunks[-1] = (*chunks[-1][:2], t + TAIL * 0.8, chunks[-1][3])
+            seg.append(np.zeros(int(TAIL * SR), np.float32))
+            dur = round((t + TAIL) * FPS) / FPS
+            part = np.concatenate(seg)
+            n = int(round(dur * SR))
+            voice_parts.append(np.pad(part, (0, max(0, n - len(part))))[:n])
+            timeline.append((chunks, dur))
+            print(f"voz {i:02d} {sc['tag']}: {dur:.1f}s", flush=True)
+            continue
         for j, line in enumerate(sc["lines"]):
             a = tts(line, os.path.join(TMP, f"v{i:02d}_{j}.wav"), i * 10 + j)
             d = len(a) / SR
