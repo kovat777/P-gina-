@@ -1,6 +1,6 @@
 # The Economist · The World Ahead 2027: la portada, descifrada
 
-Video: `videos/economist-2027-portada-descifrada.mp4` (vertical 1080×1920, ~7:38, estilo dinámico, voz "Juan" de Higgsfield (seed_audio) y música de suspenso).
+Video: `videos/economist-2027-portada-descifrada.mp4` (vertical 1080×1920, ~6:29, estilo dinámico, voz "Desmond" (ElevenLabs v4 Turbo vía Higgsfield, estabilidad 0,35) y música de suspenso).
 
 Para volver a generarlo: `python3 contenido/economist2027/render.py <portada.png> <salida.mp4> <carpeta_tmp>` y la ruta de la voz Piper como cuarto argumento (necesita ffmpeg y `pip install piper-tts`; voz `es_MX-ald-medium` de los releases de k2-fsa/sherpa-onnx).
 
