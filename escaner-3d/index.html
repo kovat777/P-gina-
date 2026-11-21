@@ -1,0 +1,739 @@
+<title>Escáner 3D de Objetos</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Sora:wght@500;700&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap">
+<style>
+/* Layout: banco de trabajo de dos columnas — controles del escaneo a la izquierda, plató 3D a la derecha; en teléfono se apilan. */
+:root{
+  --bg:#eef1f4; --panel:#ffffff; --ink:#16202b; --muted:#5b6876; --line:#d5dbe2;
+  --stage:#dfe4ea; --accent:#e0473c; --accent-ink:#ffffff; --ok:#1f8a5b; --warn:#b26a00;
+  --f-display:"Sora","Segoe UI",system-ui,sans-serif;
+  --f-body:"IBM Plex Sans","Segoe UI",system-ui,sans-serif;
+  --f-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,monospace;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0f151c; --panel:#161e27; --ink:#e6ebf0; --muted:#94a2b0; --line:#28333f;
+  --stage:#0b1016; --accent:#ff5e52; --accent-ink:#1a0806; --ok:#4cc38a; --warn:#f0a43a; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0f151c; --panel:#161e27; --ink:#e6ebf0; --muted:#94a2b0; --line:#28333f;
+  --stage:#0b1016; --accent:#ff5e52; --accent-ink:#1a0806; --ok:#4cc38a; --warn:#f0a43a; color-scheme:dark}
+[hidden]{display:none!important}
+html,body{background:var(--bg);color:var(--ink)}
+body{font-family:var(--f-body);font-size:15px;line-height:1.5;
+  padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));padding-block:20px 40px}
+.wrap{max-width:1240px;margin:0 auto;display:flex;flex-direction:column;gap:20px}
+header{display:flex;flex-wrap:wrap;align-items:flex-end;justify-content:space-between;gap:8px 24px}
+h1{font-family:var(--f-display);font-weight:700;font-size:clamp(1.6rem,3.4vw,2.3rem);margin:0;letter-spacing:-.02em;text-wrap:balance}
+h1 span{color:var(--accent)}
+.lede{color:var(--muted);margin:4px 0 0;max-width:62ch}
+.grid{display:grid;grid-template-columns:minmax(0,400px) minmax(0,1fr);gap:20px;align-items:start}
+@media (max-width:880px){.grid{grid-template-columns:minmax(0,1fr)}}
+.col{display:flex;flex-direction:column;gap:16px;min-width:0}
+section.step{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:16px;display:flex;flex-direction:column;gap:12px;min-width:0}
+.step h2{font-family:var(--f-display);font-size:1rem;font-weight:500;margin:0;display:flex;gap:10px;align-items:center}
+.step h2 b{font-family:var(--f-mono);font-size:.75rem;font-weight:500;color:var(--accent);border:1px solid var(--accent);border-radius:4px;padding:1px 6px}
+.hint{color:var(--muted);font-size:.86rem;margin:0}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,.btn{font:600 .9rem var(--f-body);border:1px solid var(--line);background:var(--bg);color:var(--ink);
+  border-radius:7px;padding:8px 12px;cursor:pointer;display:inline-flex;align-items:center;gap:6px}
+button:hover,.btn:hover{border-color:var(--muted)}
+button.primary{background:var(--accent);border-color:var(--accent);color:var(--accent-ink)}
+button:disabled{opacity:.45;cursor:not-allowed}
+button:focus-visible,.btn:focus-within,input:focus-visible,select:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.btn input{position:absolute;width:1px;height:1px;opacity:0;pointer-events:none}
+.btn{position:relative}
+label.field{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:2px 10px;font-size:.86rem;align-items:center}
+label.field output,label.field .val{font-family:var(--f-mono);font-size:.8rem;color:var(--muted);font-variant-numeric:tabular-nums}
+label.field input[type=range]{grid-column:1/-1;width:100%;accent-color:var(--accent)}
+select,input[type=number]{font:500 .86rem var(--f-mono);background:var(--bg);color:var(--ink);border:1px solid var(--line);border-radius:6px;padding:5px 6px}
+input[type=number]{width:80px}
+.two{display:grid;grid-template-columns:1fr 1fr;gap:10px 14px}
+@media (max-width:420px){.two{grid-template-columns:1fr}}
+.media{position:relative;background:var(--stage);border-radius:8px;overflow:hidden;aspect-ratio:4/3;max-width:100%;display:grid;place-items:center}
+.media video,.media canvas{width:100%;height:100%;object-fit:contain;display:block}
+.media .badge{position:absolute;left:8px;top:8px;font:500 .72rem var(--f-mono);background:var(--panel);color:var(--ink);border-radius:4px;padding:2px 6px;letter-spacing:.04em}
+.media .count{position:absolute;inset:0;display:grid;place-items:center;font:700 4rem var(--f-display);color:#fff;text-shadow:0 2px 12px #0008}
+.status{font:500 .8rem var(--f-mono);color:var(--muted);min-height:1.2em}
+.status.err{color:var(--accent)} .status.ok{color:var(--ok)}
+.bar{height:4px;background:var(--line);border-radius:2px;overflow:hidden}
+.bar i{display:block;height:100%;width:0;background:var(--accent);transition:width .15s}
+.stage{position:relative;background:var(--stage);border:1px solid var(--line);border-radius:10px;overflow:hidden;height:min(72vh,640px);min-height:360px}
+.stage canvas{display:block;width:100%;height:100%;touch-action:none}
+.hud{position:absolute;left:12px;top:12px;right:12px;display:flex;flex-wrap:wrap;justify-content:space-between;gap:8px;pointer-events:none}
+.hud .tag{font:500 .74rem var(--f-mono);background:var(--panel);border:1px solid var(--line);border-radius:5px;padding:3px 8px;letter-spacing:.03em}
+.hud .tag.demo{color:var(--warn)}
+.toolbar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;justify-content:space-between}
+.stats{display:flex;flex-wrap:wrap;gap:6px 18px;font:500 .8rem var(--f-mono);color:var(--muted);font-variant-numeric:tabular-nums}
+.stats b{color:var(--ink);font-weight:500}
+details.tips{background:var(--panel);border:1px solid var(--line);border-radius:10px;padding:12px 16px}
+details.tips summary{cursor:pointer;font-weight:600}
+details.tips ul{margin:8px 0 0;padding-left:1.1em;color:var(--muted);display:grid;gap:4px;max-width:70ch}
+.check{display:flex;gap:8px;align-items:center;font-size:.86rem}
+.check input{accent-color:var(--accent)}
+@media (prefers-reduced-motion: reduce){.bar i{transition:none}}
+</style>
+
+<div class="wrap">
+  <header>
+    <div>
+      <h1>Escáner 3D <span>·</span> cámara a modelo</h1>
+      <p class="lede">Gira un objeto frente a la cámara, la página recorta su silueta en cada ángulo y talla un volumen 3D con color. Exporta OBJ (con color) y STL (para imprimir).</p>
+    </div>
+  </header>
+
+  <div class="grid">
+    <div class="col">
+      <section class="step" aria-labelledby="s1">
+        <h2 id="s1"><b>01</b> Captura el giro</h2>
+        <p class="hint">Fondo liso que contraste con el objeto, cámara quieta y una vuelta completa a velocidad pareja (un plato giratorio o un banquito ayudan).</p>
+        <div class="media" id="liveBox" hidden>
+          <video id="live" playsinline muted></video>
+          <span class="badge" id="liveBadge">EN VIVO</span>
+          <div class="count" id="countdown" hidden></div>
+        </div>
+        <div class="row">
+          <button id="btnCam" class="primary" type="button">Usar cámara en vivo</button>
+          <label class="btn">Grabar video
+            <input id="inRecord" type="file" accept="video/*" capture="environment">
+          </label>
+          <label class="btn">Subir video o fotos
+            <input id="inUpload" type="file" accept="video/*,image/*" multiple>
+          </label>
+        </div>
+        <div class="row" id="liveCtrls" hidden>
+          <button id="btnBg" type="button">1 · Capturar fondo vacío</button>
+          <button id="btnRec" type="button" class="primary">2 · Grabar vuelta</button>
+          <select id="recSecs" aria-label="Duración de la vuelta">
+            <option value="8">8 s</option><option value="12" selected>12 s</option><option value="20">20 s</option>
+          </select>
+        </div>
+        <div class="bar"><i id="capBar"></i></div>
+        <div class="status" id="capStatus">Mostrando un ejemplo. Captura tu objeto para reemplazarlo.</div>
+      </section>
+
+      <section class="step" aria-labelledby="s2">
+        <h2 id="s2"><b>02</b> Ajusta el recorte</h2>
+        <div class="media"><canvas id="preview" width="320" height="240"></canvas><span class="badge" id="prevBadge">SIN TOMAS</span></div>
+        <label class="field" for="frameSel">Toma <output id="frameOut">–</output>
+          <input id="frameSel" type="range" min="0" max="0" value="0" disabled></label>
+        <label class="field" for="thr">Sensibilidad del recorte <output id="thrOut">48</output>
+          <input id="thr" type="range" min="10" max="140" value="48"></label>
+        <div class="two">
+          <label class="check"><input id="invDir" type="checkbox"> Giró a la izquierda</label>
+          <label class="check"><input id="fillHoles" type="checkbox" checked> Rellenar huecos</label>
+          <label class="field" for="nFrames">Tomas por vuelta <select id="nFrames"><option>24</option><option selected>36</option><option>48</option><option>72</option></select></label>
+          <label class="field" for="deg">Grados girados <input id="deg" type="number" min="90" max="720" step="10" value="360"></label>
+        </div>
+        <p class="hint">Rojo = lo que cuenta como objeto. Sube la sensibilidad si se cuela el fondo; bájala si se come partes del objeto.</p>
+      </section>
+
+      <section class="step" aria-labelledby="s3">
+        <h2 id="s3"><b>03</b> Genera el modelo</h2>
+        <div class="two">
+          <label class="field" for="res">Detalle (vóxeles) <output id="resOut">88</output>
+            <input id="res" type="range" min="40" max="160" step="8" value="88"></label>
+          <label class="field" for="smooth">Suavizado <output id="smoothOut">1</output>
+            <input id="smooth" type="range" min="0" max="3" step="1" value="1"></label>
+          <label class="field" for="tol">Tomas malas toleradas <output id="tolOut">1</output>
+            <input id="tol" type="range" min="0" max="4" step="1" value="1"></label>
+          <label class="field" for="realH">Altura real (cm) <input id="realH" type="number" min="1" max="500" step="0.5" value="12"></label>
+        </div>
+        <div class="row"><button id="btnBuild" class="primary" type="button" disabled>Generar 3D</button></div>
+        <div class="bar"><i id="buildBar"></i></div>
+        <div class="status" id="buildStatus"></div>
+      </section>
+    </div>
+
+    <div class="col">
+      <div class="stage" id="stage">
+        <div class="hud"><span class="tag demo" id="hudTag">EJEMPLO · jarrón generado</span><span class="tag" id="hudHint">Arrastra para girar · pellizca o rueda para acercar</span></div>
+      </div>
+      <div class="toolbar">
+        <div class="stats" id="stats"></div>
+        <div class="row">
+          <label class="check"><input id="showColor" type="checkbox" checked> Color</label>
+          <label class="check"><input id="autoRot" type="checkbox" checked> Girar solo</label>
+          <button id="btnExport" type="button" class="primary">Descargar OBJ + STL (.zip)</button>
+        </div>
+      </div>
+      <div class="status" id="expStatus"></div>
+      <details class="tips">
+        <summary>Cómo sacar un buen escaneo</summary>
+        <ul>
+          <li>Cámara fija (apóyala o usa trípode) a la altura del centro del objeto y lo más lejos que permita el encuadre: el método asume vista casi paralela.</li>
+          <li>Coloca el objeto al centro del plato giratorio. El eje de giro es el centro horizontal de la silueta.</li>
+          <li>Con cámara en vivo, captura primero el fondo vacío: el recorte sale mucho más limpio que con video subido.</li>
+          <li>Funciona por siluetas: concavidades (el interior de una taza) quedan rellenas. Objetos mates y opacos salen mejor que brillantes o transparentes.</li>
+          <li>Si el modelo sale espejado o retorcido, marca “Giró a la izquierda” y vuelve a generar.</li>
+          <li>El STL va directo a un laminador (Cura, PrusaSlicer). El OBJ guarda color por vértice: ábrelo en Blender o MeshLab.</li>
+        </ul>
+      </details>
+    </div>
+  </div>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/build/three.min.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/three@0.147.0/examples/js/controls/OrbitControls.js"></script>
+<script>
+(() => {
+const $ = s => document.querySelector(s);
+const AW = 320;                 // ancho de análisis en píxeles
+let frames = [];                // {img: ImageData, mask: Uint8Array}
+let FW = 0, FH = 0, bgImg = null, source = '';
+let current = null;             // {pos, idx, col, demo}
+
+/* ---------- utilidades ---------- */
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const tick = () => new Promise(r => setTimeout(r, 0));
+function setStatus(el, msg, kind) { el.textContent = msg; el.className = 'status' + (kind ? ' ' + kind : ''); }
+function once(el, ev, timeout) {
+  return new Promise((res, rej) => {
+    let t; const h = () => { clearTimeout(t); el.removeEventListener(ev, h); res(); };
+    el.addEventListener(ev, h);
+    if (timeout) t = setTimeout(() => { el.removeEventListener(ev, h); res(); }, timeout);
+  });
+}
+
+/* ---------- segmentación ---------- */
+function median(a) { a.sort((x, y) => x - y); return a[a.length >> 1]; }
+function borderColor(d, w, h) {
+  const r = [], g = [], b = [];
+  const push = i => { r.push(d[i]); g.push(d[i + 1]); b.push(d[i + 2]); };
+  for (let x = 0; x < w; x += 2) { push(x * 4); push(((h - 1) * w + x) * 4); }
+  for (let y = 0; y < h; y += 2) { push(y * w * 4); push((y * w + w - 1) * 4); }
+  return [median(r), median(g), median(b)];
+}
+function morph(m, w, h, grow) {
+  const o = new Uint8Array(m.length);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    let v = grow ? 0 : 1;
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+      const xx = x + dx, yy = y + dy;
+      const s = (xx < 0 || yy < 0 || xx >= w || yy >= h) ? 0 : m[yy * w + xx];
+      if (grow) { if (s) v = 1; } else if (!s) v = 0;
+    }
+    o[y * w + x] = v;
+  }
+  return o;
+}
+function largestComponent(m, w, h) {
+  const lab = new Int32Array(m.length), stack = new Int32Array(m.length);
+  let best = 0, bestSize = 0, cur = 0;
+  for (let i = 0; i < m.length; i++) {
+    if (!m[i] || lab[i]) continue;
+    cur++; let sp = 0, size = 0; stack[sp++] = i; lab[i] = cur;
+    while (sp) {
+      const p = stack[--sp]; size++;
+      const x = p % w, y = (p / w) | 0;
+      if (x > 0 && m[p - 1] && !lab[p - 1]) { lab[p - 1] = cur; stack[sp++] = p - 1; }
+      if (x < w - 1 && m[p + 1] && !lab[p + 1]) { lab[p + 1] = cur; stack[sp++] = p + 1; }
+      if (y > 0 && m[p - w] && !lab[p - w]) { lab[p - w] = cur; stack[sp++] = p - w; }
+      if (y < h - 1 && m[p + w] && !lab[p + w]) { lab[p + w] = cur; stack[sp++] = p + w; }
+    }
+    if (size > bestSize) { bestSize = size; best = cur; }
+  }
+  const o = new Uint8Array(m.length);
+  for (let i = 0; i < m.length; i++) o[i] = lab[i] === best && best ? 1 : 0;
+  return o;
+}
+function fillHoles(m, w, h) {
+  const seen = new Uint8Array(m.length), stack = new Int32Array(m.length); let sp = 0;
+  const seed = i => { if (!m[i] && !seen[i]) { seen[i] = 1; stack[sp++] = i; } };
+  for (let x = 0; x < w; x++) { seed(x); seed((h - 1) * w + x); }
+  for (let y = 0; y < h; y++) { seed(y * w); seed(y * w + w - 1); }
+  while (sp) {
+    const p = stack[--sp], x = p % w, y = (p / w) | 0;
+    if (x > 0) seed(p - 1); if (x < w - 1) seed(p + 1); if (y > 0) seed(p - w); if (y < h - 1) seed(p + w);
+  }
+  const o = new Uint8Array(m.length);
+  for (let i = 0; i < m.length; i++) o[i] = seen[i] ? 0 : 1;
+  return o;
+}
+function segment(img, thr) {
+  const { data: d, width: w, height: h } = img, n = w * h;
+  let m = new Uint8Array(n);
+  const bg = bgImg && bgImg.width === w && bgImg.height === h ? bgImg.data : null;
+  const bc = bg ? null : borderColor(d, w, h);
+  const t2 = thr * thr;
+  for (let i = 0; i < n; i++) {
+    const j = i * 4;
+    const dr = d[j] - (bg ? bg[j] : bc[0]), dg = d[j + 1] - (bg ? bg[j + 1] : bc[1]), db = d[j + 2] - (bg ? bg[j + 2] : bc[2]);
+    m[i] = dr * dr + dg * dg + db * db > t2 ? 1 : 0;
+  }
+  m = morph(morph(m, w, h, false), w, h, true);   // apertura: quita ruido
+  m = largestComponent(m, w, h);
+  if ($('#fillHoles').checked) m = fillHoles(m, w, h);
+  return m;
+}
+function segmentAll() {
+  const thr = +$('#thr').value;
+  for (const f of frames) f.mask = segment(f.img, thr);
+  drawPreview();
+}
+
+/* ---------- vista previa del recorte ---------- */
+const pv = $('#preview'), pctx = pv.getContext('2d');
+function drawPreview() {
+  if (!frames.length) return;
+  const i = Math.min(+$('#frameSel').value, frames.length - 1), f = frames[i];
+  pv.width = FW; pv.height = FH;
+  const out = new ImageData(new Uint8ClampedArray(f.img.data), FW, FH), d = out.data;
+  for (let p = 0; p < FW * FH; p++) {
+    const j = p * 4;
+    if (f.mask[p]) { d[j] = d[j] * .45 + 224 * .55; d[j + 1] = d[j + 1] * .45 + 71 * .55; d[j + 2] = d[j + 2] * .45 + 60 * .55; }
+    else { d[j] *= .35; d[j + 1] *= .35; d[j + 2] *= .35; }
+  }
+  pctx.putImageData(out, 0, 0);
+  const deg = +$('#deg').value;
+  $('#frameOut').textContent = `${i + 1}/${frames.length} · ${(i / frames.length * deg).toFixed(0)}°`;
+  $('#prevBadge').textContent = source;
+}
+
+/* ---------- entrada: video ---------- */
+async function framesFromVideo(file) {
+  const N = +$('#nFrames').value;
+  const v = document.createElement('video');
+  v.muted = true; v.playsInline = true; v.preload = 'auto';
+  v.src = URL.createObjectURL(file);
+  await once(v, 'loadedmetadata', 8000);
+  if (!v.videoWidth) throw new Error('No se pudo leer el video. Prueba con MP4 o WebM.');
+  let dur = v.duration;
+  if (!isFinite(dur)) { v.currentTime = 1e9; await once(v, 'seeked', 3000); dur = v.duration; v.currentTime = 0; }
+  try { await v.play(); v.pause(); } catch (e) {}
+  FW = AW; FH = Math.round(v.videoHeight * AW / v.videoWidth);
+  const c = document.createElement('canvas'); c.width = FW; c.height = FH;
+  const ctx = c.getContext('2d', { willReadFrequently: true });
+  const out = [];
+  for (let i = 0; i < N; i++) {
+    v.currentTime = Math.min(dur * i / N, Math.max(0, dur - 0.05));
+    await once(v, 'seeked', 2500);
+    ctx.drawImage(v, 0, 0, FW, FH);
+    out.push({ img: ctx.getImageData(0, 0, FW, FH) });
+    $('#capBar').style.width = ((i + 1) / N * 100) + '%';
+  }
+  URL.revokeObjectURL(v.src);
+  return out;
+}
+async function framesFromImages(files) {
+  files.sort((a, b) => a.name.localeCompare(b.name, undefined, { numeric: true }));
+  const out = []; let c, ctx;
+  for (let i = 0; i < files.length; i++) {
+    const url = URL.createObjectURL(files[i]);
+    const im = new Image(); im.src = url; await im.decode();
+    if (!c) { FW = AW; FH = Math.round(im.naturalHeight * AW / im.naturalWidth); c = document.createElement('canvas'); c.width = FW; c.height = FH; ctx = c.getContext('2d', { willReadFrequently: true }); }
+    ctx.drawImage(im, 0, 0, FW, FH);
+    out.push({ img: ctx.getImageData(0, 0, FW, FH) });
+    URL.revokeObjectURL(url);
+    $('#capBar').style.width = ((i + 1) / files.length * 100) + '%';
+  }
+  return out;
+}
+async function handleFiles(list) {
+  const files = [...list]; if (!files.length) return;
+  const st = $('#capStatus');
+  try {
+    const vid = files.find(f => f.type.startsWith('video/'));
+    setStatus(st, vid ? 'Extrayendo tomas del video…' : `Leyendo ${files.length} fotos…`);
+    bgImg = null;
+    const fr = vid ? await framesFromVideo(vid) : await framesFromImages(files.filter(f => f.type.startsWith('image/')));
+    if (fr.length < 8) throw new Error('Hacen falta al menos 8 tomas alrededor del objeto.');
+    source = vid ? 'VIDEO' : 'FOTOS';
+    acceptFrames(fr);
+    setStatus(st, `${fr.length} tomas listas. Revisa el recorte y genera el modelo.`, 'ok');
+  } catch (e) { setStatus(st, e.message || 'No se pudo leer el archivo.', 'err'); }
+}
+function acceptFrames(fr) {
+  frames = fr;
+  const s = $('#frameSel'); s.max = frames.length - 1; s.value = 0; s.disabled = false;
+  $('#btnBuild').disabled = false;
+  segmentAll();
+}
+$('#inRecord').addEventListener('change', e => handleFiles(e.target.files));
+$('#inUpload').addEventListener('change', e => handleFiles(e.target.files));
+
+/* ---------- entrada: cámara en vivo ---------- */
+const live = $('#live'); let stream = null;
+const grabCanvas = document.createElement('canvas');
+function grab() {
+  const w = AW, h = Math.round(live.videoHeight * AW / live.videoWidth);
+  grabCanvas.width = w; grabCanvas.height = h;
+  const ctx = grabCanvas.getContext('2d', { willReadFrequently: true });
+  ctx.drawImage(live, 0, 0, w, h);
+  return ctx.getImageData(0, 0, w, h);
+}
+$('#btnCam').addEventListener('click', async () => {
+  const st = $('#capStatus');
+  if (stream) { stream.getTracks().forEach(t => t.stop()); stream = null; $('#liveBox').hidden = true; $('#liveCtrls').hidden = true; $('#btnCam').textContent = 'Usar cámara en vivo'; return; }
+  try {
+    if (!navigator.mediaDevices?.getUserMedia) throw new Error('nocam');
+    stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'environment', width: { ideal: 1280 } }, audio: false });
+    live.srcObject = stream; await live.play();
+    $('#liveBox').hidden = false; $('#liveCtrls').hidden = false; $('#btnCam').textContent = 'Apagar cámara';
+    setStatus(st, 'Saca el objeto del encuadre y pulsa “Capturar fondo vacío”.');
+  } catch (e) {
+    setStatus(st, 'Esta vista no permite la cámara en vivo. Usa “Grabar video” (abre la cámara del teléfono) o abre el archivo index.html del repositorio en Chrome.', 'err');
+  }
+});
+$('#btnBg').addEventListener('click', () => {
+  if (!live.videoWidth) return;
+  bgImg = grab();
+  setStatus($('#capStatus'), 'Fondo guardado. Coloca el objeto en el centro y pulsa “Grabar vuelta”.', 'ok');
+});
+$('#btnRec').addEventListener('click', async () => {
+  if (!live.videoWidth) return;
+  const N = +$('#nFrames').value, secs = +$('#recSecs').value, cd = $('#countdown');
+  $('#btnRec').disabled = true;
+  cd.hidden = false;
+  for (let k = 3; k > 0; k--) { cd.textContent = k; await sleep(800); }
+  cd.hidden = true;
+  $('#liveBadge').textContent = 'GRABANDO · gira el objeto una vuelta';
+  const fr = [], t0 = performance.now();
+  for (let i = 0; i < N; i++) {
+    const target = t0 + secs * 1000 * i / N;
+    const wait = target - performance.now(); if (wait > 0) await sleep(wait);
+    fr.push({ img: grab() });
+    $('#capBar').style.width = ((i + 1) / N * 100) + '%';
+  }
+  FW = fr[0].img.width; FH = fr[0].img.height;
+  $('#liveBadge').textContent = 'EN VIVO'; $('#btnRec').disabled = false;
+  source = bgImg ? 'CÁMARA + FONDO' : 'CÁMARA';
+  $('#deg').value = 360;
+  acceptFrames(fr);
+  setStatus($('#capStatus'), `${N} tomas en ${secs} s. Revisa el recorte y genera el modelo.`, 'ok');
+});
+
+/* ---------- controles ---------- */
+const bindOut = (id, fn) => { const el = $('#' + id), o = $('#' + id + 'Out'); const u = () => o.textContent = el.value; el.addEventListener('input', () => { u(); fn && fn(); }); u(); };
+let segTimer;
+bindOut('thr', () => { clearTimeout(segTimer); segTimer = setTimeout(() => frames.length && segmentAll(), 120); });
+bindOut('res'); bindOut('smooth'); bindOut('tol');
+$('#frameSel').addEventListener('input', drawPreview);
+$('#fillHoles').addEventListener('change', () => frames.length && segmentAll());
+$('#deg').addEventListener('change', drawPreview);
+
+/* ---------- tallado por siluetas (visual hull) ---------- */
+async function carve() {
+  const N = frames.length, deg = +$('#deg').value, dir = $('#invDir').checked ? -1 : 1;
+  const res = +$('#res').value, tol = +$('#tol').value;
+  const masks = frames.map(f => morph(f.mask, FW, FH, true));   // margen de 1 px
+  let x0 = FW, x1 = -1, y0 = FH, y1 = -1, cxs = 0, cn = 0;
+  for (const m of masks) {
+    let a = FW, b = -1;
+    for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) if (m[y * FW + x]) {
+      if (x < a) a = x; if (x > b) b = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
+    }
+    if (b >= 0) { x0 = Math.min(x0, a); x1 = Math.max(x1, b); cxs += (a + b) / 2; cn++; }
+  }
+  if (cn < N * 0.7) throw new Error('En varias tomas no se encontró el objeto. Ajusta la sensibilidad.');
+  const cx = cxs / cn, R = Math.max(cx - x0, x1 - cx) + 2, hgt = y1 - y0 + 1;
+  const s = Math.max(2 * R, hgt) / res;
+  const nx = Math.ceil(2 * R / s), nz = nx, ny = Math.ceil(hgt / s);
+  const miss = new Uint8Array(nx * ny * nz);
+  const Xs = new Float32Array(nx), Zs = new Float32Array(nz);
+  for (let i = 0; i < nx; i++) Xs[i] = -R + (i + 0.5) * s;
+  for (let k = 0; k < nz; k++) Zs[k] = -R + (k + 0.5) * s;
+  const thetas = [];
+  const XC = new Float32Array(nx), ZS = new Float32Array(nz);
+  for (let f = 0; f < N; f++) {
+    const th = dir * (f / N) * deg * Math.PI / 180; thetas.push(th);
+    const c = Math.cos(th), sn = Math.sin(th), m = masks[f];
+    for (let i = 0; i < nx; i++) XC[i] = cx + Xs[i] * c;
+    for (let k = 0; k < nz; k++) ZS[k] = Zs[k] * sn;
+    for (let j = 0; j < ny; j++) {
+      const py = Math.min(FH - 1, Math.floor(y0 + (j + 0.5) * s)), row = py * FW;
+      for (let k = 0; k < nz; k++) {
+        const base = (k * ny + j) * nx, zs = ZS[k];
+        for (let i = 0; i < nx; i++) {
+          const v = base + i; if (miss[v] > tol) continue;
+          const px = (XC[i] + zs) | 0;
+          if (px < 0 || px >= FW || !m[row + px]) miss[v]++;
+        }
+      }
+    }
+    $('#buildBar').style.width = ((f + 1) / N * 70) + '%';
+    if (f % 4 === 3) await tick();
+  }
+  const occ = new Float32Array(nx * ny * nz); let filled = 0;
+  for (let v = 0; v < occ.length; v++) if (miss[v] <= tol) { occ[v] = 1; filled++; }
+  if (filled < 20) throw new Error('El volumen quedó vacío. Revisa el recorte o activa “Giró a la izquierda”.');
+  const map = (gx, gy, gz) => [-R + (gx + 0.5) * s, y0 + (gy + 0.5) * s, -R + (gz + 0.5) * s];
+  return { occ, nx, ny, nz, map, thetas, cx };
+}
+
+/* ---------- malla: surface nets ---------- */
+function blur(f, nx, ny, nz) {
+  const o = new Float32Array(f.length), idx = (x, y, z) => (z * ny + y) * nx + x;
+  const pass = (src, dst, ax) => {
+    for (let z = 0; z < nz; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < nx; x++) {
+      const p = [x, y, z], n = [nx, ny, nz][ax];
+      const a = p.slice(), b = p.slice(); a[ax] = Math.max(0, p[ax] - 1); b[ax] = Math.min(n - 1, p[ax] + 1);
+      dst[idx(x, y, z)] = 0.25 * src[idx(...a)] + 0.5 * src[idx(x, y, z)] + 0.25 * src[idx(...b)];
+    }
+  };
+  const t = new Float32Array(f.length);
+  pass(f, t, 0); pass(t, o, 1); pass(o, t, 2);
+  return t;
+}
+function surfaceNets(vox, sx, sy, sz, smooth, map) {
+  // campo con borde de ceros
+  const fx = sx + 2, fy = sy + 2, fz = sz + 2;
+  let f = new Float32Array(fx * fy * fz);
+  for (let z = 0; z < sz; z++) for (let y = 0; y < sy; y++) for (let x = 0; x < sx; x++)
+    f[((z + 1) * fy + y + 1) * fx + x + 1] = vox[(z * sy + y) * sx + x];
+  for (let i = 0; i < smooth; i++) f = blur(f, fx, fy, fz);
+  const iso = 0.5, F = (x, y, z) => f[(z * fy + y) * fx + x];
+  const cx = fx - 1, cy = fy - 1, cz = fz - 1;
+  const cell = new Int32Array(cx * cy * cz).fill(-1);
+  const C = [[0,0,0],[1,0,0],[0,1,0],[1,1,0],[0,0,1],[1,0,1],[0,1,1],[1,1,1]];
+  const E = []; for (let a = 0; a < 8; a++) for (const bit of [1, 2, 4]) if (!(a & bit)) E.push([a, a | bit]);
+  const pos = [];
+  const val = new Float32Array(8);
+  for (let z = 0; z < cz; z++) for (let y = 0; y < cy; y++) for (let x = 0; x < cx; x++) {
+    let mask = 0;
+    for (let c = 0; c < 8; c++) { val[c] = F(x + C[c][0], y + C[c][1], z + C[c][2]); if (val[c] > iso) mask |= 1 << c; }
+    if (mask === 0 || mask === 255) continue;
+    let px = 0, py = 0, pz = 0, n = 0;
+    for (const [a, b] of E) {
+      if ((val[a] > iso) === (val[b] > iso)) continue;
+      const t = (iso - val[a]) / (val[b] - val[a]);
+      px += C[a][0] + t * (C[b][0] - C[a][0]); py += C[a][1] + t * (C[b][1] - C[a][1]); pz += C[a][2] + t * (C[b][2] - C[a][2]); n++;
+    }
+    cell[(z * cy + y) * cx + x] = pos.length / 3;
+    const w = map(x + px / n - 1, y + py / n - 1, z + pz / n - 1);
+    pos.push(w[0], w[1], w[2]);
+  }
+  const idx = [];
+  const D = [fx, fy, fz], cid = p => (p[2] >= 0 && p[1] >= 0 && p[0] >= 0 && p[0] < cx && p[1] < cy && p[2] < cz) ? cell[(p[2] * cy + p[1]) * cx + p[0]] : -1;
+  for (let z = 0; z < fz; z++) for (let y = 0; y < fy; y++) for (let x = 0; x < fx; x++) {
+    const a = F(x, y, z) > iso;
+    for (let ax = 0; ax < 3; ax++) {
+      const q = [x, y, z]; q[ax]++; if (q[ax] >= D[ax]) continue;
+      if (a === (F(q[0], q[1], q[2]) > iso)) continue;
+      const u = (ax + 1) % 3, v = (ax + 2) % 3;
+      const p0 = [x, y, z]; p0[u]--; p0[v]--;
+      const p1 = [x, y, z]; p1[v]--;
+      const p2 = [x, y, z];
+      const p3 = [x, y, z]; p3[u]--;
+      const v0 = cid(p0), v1 = cid(p1), v2 = cid(p2), v3 = cid(p3);
+      if (v0 < 0 || v1 < 0 || v2 < 0 || v3 < 0) continue;
+      if (a) idx.push(v0, v1, v2, v0, v2, v3); else idx.push(v0, v2, v1, v0, v3, v2);
+    }
+  }
+  // orientar hacia afuera (volumen con signo positivo)
+  let vol = 0;
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    vol += pos[a] * (pos[b + 1] * pos[c + 2] - pos[b + 2] * pos[c + 1]) - pos[a + 1] * (pos[b] * pos[c + 2] - pos[b + 2] * pos[c]) + pos[a + 2] * (pos[b] * pos[c + 1] - pos[b + 1] * pos[c]);
+  }
+  if (vol < 0) for (let t = 0; t < idx.length; t += 3) { const k = idx[t + 1]; idx[t + 1] = idx[t + 2]; idx[t + 2] = k; }
+  const nrm = new Float32Array(pos.length);
+  for (let t = 0; t < idx.length; t += 3) {
+    const a = idx[t] * 3, b = idx[t + 1] * 3, c = idx[t + 2] * 3;
+    const ux = pos[b] - pos[a], uy = pos[b + 1] - pos[a + 1], uz = pos[b + 2] - pos[a + 2];
+    const vx = pos[c] - pos[a], vy = pos[c + 1] - pos[a + 1], vz = pos[c + 2] - pos[a + 2];
+    const nx = uy * vz - uz * vy, ny = uz * vx - ux * vz, nz = ux * vy - uy * vx;
+    for (const o of [a, b, c]) { nrm[o] += nx; nrm[o + 1] += ny; nrm[o + 2] += nz; }
+  }
+  for (let i = 0; i < nrm.length; i += 3) { const l = Math.hypot(nrm[i], nrm[i + 1], nrm[i + 2]) || 1; nrm[i] /= l; nrm[i + 1] /= l; nrm[i + 2] /= l; }
+  return { pos: new Float32Array(pos), idx: new Uint32Array(idx), nrm };
+}
+
+/* ---------- color desde las tomas ---------- */
+function colorize(m, thetas, cx) {
+  const n = m.pos.length / 3, col = new Float32Array(n * 3);
+  const dirs = thetas.map(t => [Math.sin(t), -Math.cos(t), Math.cos(t), Math.sin(t)]);
+  for (let v = 0; v < n; v++) {
+    const X = m.pos[v * 3], Y = m.pos[v * 3 + 1], Z = m.pos[v * 3 + 2];
+    const nx = m.nrm[v * 3], nz = m.nrm[v * 3 + 2];
+    let r = 0, g = 0, b = 0, wsum = 0;
+    for (let f = 0; f < frames.length; f++) {
+      const [s, mc] = dirs[f];
+      const w = nx * s + nz * mc; if (w <= 0.15) continue;
+      const ww = w * w * w;
+      const px = Math.round(cx + X * dirs[f][2] + Z * dirs[f][3]), py = Math.round(Y);
+      if (px < 0 || py < 0 || px >= FW || py >= FH) continue;
+      const j = (py * FW + px) * 4, d = frames[f].img.data;
+      r += d[j] * ww; g += d[j + 1] * ww; b += d[j + 2] * ww; wsum += ww;
+    }
+    if (wsum > 0) { col[v * 3] = r / wsum / 255; col[v * 3 + 1] = g / wsum / 255; col[v * 3 + 2] = b / wsum / 255; }
+    else { col[v * 3] = col[v * 3 + 1] = col[v * 3 + 2] = 0.6; }
+  }
+  return col;
+}
+
+/* ---------- escena 3D ---------- */
+const stage = $('#stage');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.setPixelRatio(Math.min(2, devicePixelRatio));
+renderer.outputEncoding = THREE.sRGBEncoding;
+stage.prepend(renderer.domElement);
+const scene = new THREE.Scene();
+const camera = new THREE.PerspectiveCamera(38, 1, 0.01, 100);
+camera.position.set(2.8, 1.6, 3.4);
+const controls = new THREE.OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true; controls.autoRotate = true; controls.autoRotateSpeed = 1.4;
+scene.add(new THREE.HemisphereLight(0xffffff, 0x445566, 0.9));
+const key = new THREE.DirectionalLight(0xffffff, 0.8); key.position.set(3, 4, 2); scene.add(key);
+const rim = new THREE.DirectionalLight(0xffffff, 0.35); rim.position.set(-3, 1, -3); scene.add(rim);
+const floor = new THREE.Mesh(new THREE.CircleGeometry(1.4, 64), new THREE.MeshBasicMaterial({ color: 0x000000, transparent: true, opacity: 0.08 }));
+floor.rotation.x = -Math.PI / 2; floor.position.y = -1.001; scene.add(floor);
+const ring = new THREE.Mesh(new THREE.RingGeometry(1.38, 1.4, 96), new THREE.MeshBasicMaterial({ color: 0xe0473c }));
+ring.rotation.x = -Math.PI / 2; ring.position.y = -1; scene.add(ring);
+const material = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.75, metalness: 0.02, side: THREE.DoubleSide });
+let meshObj = null;
+function themeColors() {
+  const cs = getComputedStyle(document.body);
+  scene.background = new THREE.Color(cs.getPropertyValue('--stage').trim() || '#dfe4ea');
+  ring.material.color.set(cs.getPropertyValue('--accent').trim() || '#e0473c');
+}
+themeColors();
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', themeColors);
+new MutationObserver(themeColors).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+function resize() { const w = stage.clientWidth, h = stage.clientHeight; renderer.setSize(w, h, false); camera.aspect = w / h; camera.updateProjectionMatrix(); }
+new ResizeObserver(resize).observe(stage); resize();
+(function loop() { controls.update(); renderer.render(scene, camera); requestAnimationFrame(loop); })();
+$('#autoRot').addEventListener('change', e => controls.autoRotate = e.target.checked);
+$('#showColor').addEventListener('change', e => { material.vertexColors = e.target.checked; material.color.set(e.target.checked ? 0xffffff : 0xb8c2cc); material.needsUpdate = true; });
+
+// Convierte coords de tallado (x der, y abajo, z al fondo) a la escena (y arriba): giro de 180° en X.
+function showMesh(m, col, label, demo) {
+  const n = m.pos.length / 3, P = new Float32Array(m.pos.length);
+  let mn = [1e9, 1e9, 1e9], mx = [-1e9, -1e9, -1e9];
+  for (let v = 0; v < n; v++) {
+    const p = [m.pos[v * 3], -m.pos[v * 3 + 1], -m.pos[v * 3 + 2]];
+    for (let a = 0; a < 3; a++) { P[v * 3 + a] = p[a]; mn[a] = Math.min(mn[a], p[a]); mx[a] = Math.max(mx[a], p[a]); }
+  }
+  const h = mx[1] - mn[1], sc = 2 / Math.max(h, mx[0] - mn[0], mx[2] - mn[2]);
+  const cxm = (mn[0] + mx[0]) / 2, czm = (mn[2] + mx[2]) / 2;
+  for (let v = 0; v < n; v++) { P[v * 3] = (P[v * 3] - cxm) * sc; P[v * 3 + 1] = (P[v * 3 + 1] - mn[1]) * sc - 1; P[v * 3 + 2] = (P[v * 3 + 2] - czm) * sc; }
+  const g = new THREE.BufferGeometry();
+  g.setAttribute('position', new THREE.BufferAttribute(P, 3));
+  g.setAttribute('color', new THREE.BufferAttribute(col, 3));
+  g.setIndex(new THREE.BufferAttribute(m.idx, 1));
+  g.computeVertexNormals();
+  if (meshObj) { meshObj.geometry.dispose(); scene.remove(meshObj); }
+  meshObj = new THREE.Mesh(g, material); scene.add(meshObj);
+  controls.target.set(0, 0, 0);
+  current = { pos: P, idx: m.idx, col, demo, ratio: [(mx[0] - mn[0]) / h, (mx[2] - mn[2]) / h] };
+  const tag = $('#hudTag'); tag.textContent = label; tag.className = 'tag' + (demo ? ' demo' : '');
+  updateStats();
+}
+function updateStats() {
+  if (!current) return;
+  const H = +$('#realH').value || 10;
+  $('#stats').innerHTML = `<span>Vértices <b>${(current.pos.length / 3).toLocaleString('es')}</b></span>` +
+    `<span>Triángulos <b>${(current.idx.length / 3).toLocaleString('es')}</b></span>` +
+    `<span>Tamaño <b>${(H * current.ratio[0]).toFixed(1)} × ${H.toFixed(1)} × ${(H * current.ratio[1]).toFixed(1)} cm</b></span>`;
+}
+$('#realH').addEventListener('input', updateStats);
+
+/* ---------- generar ---------- */
+$('#btnBuild').addEventListener('click', async () => {
+  const st = $('#buildStatus'), btn = $('#btnBuild');
+  btn.disabled = true; $('#buildBar').style.width = '0%';
+  try {
+    setStatus(st, 'Tallando el volumen con las siluetas…');
+    await tick();
+    const t0 = performance.now();
+    const c = await carve();
+    setStatus(st, 'Construyendo la superficie…'); await tick();
+    const m = surfaceNets(c.occ, c.nx, c.ny, c.nz, +$('#smooth').value, c.map);
+    $('#buildBar').style.width = '85%'; await tick();
+    setStatus(st, 'Pintando con el color de las tomas…'); await tick();
+    const col = colorize(m, c.thetas, c.cx);
+    showMesh(m, col, `TU ESCANEO · ${frames.length} tomas`, false);
+    $('#buildBar').style.width = '100%';
+    setStatus(st, `Listo en ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok');
+  } catch (e) { setStatus(st, e.message || 'Algo falló al generar el modelo.', 'err'); }
+  btn.disabled = false;
+});
+
+/* ---------- ejemplo inicial: jarrón ---------- */
+(function demo() {
+  const n = 64, ny = 80, occ = new Float32Array(n * ny * n);
+  const r = y => { const t = y / ny; return 0.18 + 0.2 * Math.sin(Math.PI * (t * 0.85 + 0.1)) + 0.06 * Math.cos(t * 9) * (t > 0.75 ? 1 : 0.2); };
+  for (let z = 0; z < n; z++) for (let y = 0; y < ny; y++) for (let x = 0; x < n; x++) {
+    const dx = (x - n / 2) / n, dz = (z - n / 2) / n, rad = Math.hypot(dx, dz);
+    occ[(z * ny + y) * n + x] = rad < r(y) && y > 2 && y < ny - 2 ? 1 : 0;
+  }
+  const m = surfaceNets(occ, n, ny, n, 2, (x, y, z) => [x, y, z]);
+  const col = new Float32Array(m.pos.length);
+  for (let v = 0; v < m.pos.length / 3; v++) {
+    const y = m.pos[v * 3 + 1] / ny, band = Math.sin(y * 34) > 0.6 ? 1 : 0;
+    const base = band ? [0.86, 0.34, 0.28] : [0.93, 0.89, 0.82];
+    for (let a = 0; a < 3; a++) col[v * 3 + a] = base[a] * (0.92 + 0.08 * Math.sin(m.pos[v * 3] * 0.6));
+  }
+  showMesh(m, col, 'EJEMPLO · jarrón generado', true);
+})();
+
+/* ---------- exportar ---------- */
+const CRC = (() => { const t = new Uint32Array(256); for (let i = 0; i < 256; i++) { let c = i; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[i] = c >>> 0; } return t; })();
+function crc32(u) { let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = CRC[(c ^ u[i]) & 255] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function makeZip(files) {
+  const enc = new TextEncoder(), parts = [], central = []; let off = 0;
+  for (const f of files) {
+    const name = enc.encode(f.name), data = f.data, crc = crc32(data);
+    const h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint32(14, crc, true);
+    h.setUint32(18, data.length, true); h.setUint32(22, data.length, true); h.setUint16(26, name.length, true);
+    parts.push(new Uint8Array(h.buffer), name, data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint32(16, crc, true);
+    c.setUint32(20, data.length, true); c.setUint32(24, data.length, true); c.setUint16(28, name.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), name);
+    off += 30 + name.length + data.length;
+  }
+  const csize = central.reduce((s, p) => s + p.length, 0);
+  const e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, files.length, true); e.setUint16(10, files.length, true);
+  e.setUint32(12, csize, true); e.setUint32(16, off, true);
+  return new Blob([...parts, ...central, new Uint8Array(e.buffer)], { type: 'application/zip' });
+}
+function buildFiles() {
+  const H = (+$('#realH').value || 10) * 10;        // mm
+  const k = H / 2, P = current.pos, I = current.idx, Cc = current.col, n = P.length / 3;
+  const mm = i => P[i] * k + (i % 3 === 1 ? k : 0);  // base en z=0
+  let obj = '# Escáner 3D de Objetos · unidades: mm · color por vértice\n';
+  for (let v = 0; v < n; v++) obj += `v ${mm(v * 3).toFixed(3)} ${mm(v * 3 + 1).toFixed(3)} ${mm(v * 3 + 2).toFixed(3)} ${Cc[v * 3].toFixed(3)} ${Cc[v * 3 + 1].toFixed(3)} ${Cc[v * 3 + 2].toFixed(3)}\n`;
+  for (let t = 0; t < I.length; t += 3) obj += `f ${I[t] + 1} ${I[t + 1] + 1} ${I[t + 2] + 1}\n`;
+  const tris = I.length / 3, buf = new ArrayBuffer(84 + tris * 50), dv = new DataView(buf);
+  dv.setUint32(80, tris, true);
+  // STL con Z hacia arriba: (x, y, z)escena -> (x, -z, y)
+  const sp = v => [mm(v * 3), -mm(v * 3 + 2), mm(v * 3 + 1)];
+  for (let t = 0; t < tris; t++) {
+    const a = sp(I[t * 3]), b = sp(I[t * 3 + 1]), c = sp(I[t * 3 + 2]);
+    const u = [b[0] - a[0], b[1] - a[1], b[2] - a[2]], w = [c[0] - a[0], c[1] - a[1], c[2] - a[2]];
+    let nn = [u[1] * w[2] - u[2] * w[1], u[2] * w[0] - u[0] * w[2], u[0] * w[1] - u[1] * w[0]];
+    const l = Math.hypot(...nn) || 1; nn = nn.map(x => x / l);
+    const o = 84 + t * 50;
+    [...nn, ...a, ...b, ...c].forEach((x, q) => dv.setFloat32(o + q * 4, x, true));
+  }
+  const enc = new TextEncoder();
+  const info = `Escaneo exportado ${new Date().toLocaleString('es')}\nAltura: ${(H / 10).toFixed(1)} cm\nVértices: ${n}\nTriángulos: ${tris}\n\nmodelo.obj  -> malla con color por vértice (Blender, MeshLab)\nmodelo.stl  -> para impresión 3D (Cura, PrusaSlicer, Bambu Studio)\n`;
+  return makeZip([
+    { name: 'modelo.obj', data: enc.encode(obj) },
+    { name: 'modelo.stl', data: new Uint8Array(buf) },
+    { name: 'LEEME.txt', data: enc.encode(info) },
+  ]);
+}
+$('#btnExport').addEventListener('click', async () => {
+  const st = $('#expStatus');
+  if (!current) return;
+  const blob = buildFiles(), name = current.demo ? 'ejemplo-jarron-3d.zip' : 'escaneo-3d.zip';
+  if (window.claude && typeof window.claude.use === 'function') {
+    try {
+      const dl = await window.claude.use('downloads');
+      if (!dl) { setStatus(st, 'Las descargas no están disponibles en esta vista.', 'err'); return; }
+      await dl.save({ filename: name, data: blob });
+      setStatus(st, 'Archivo guardado.', 'ok');
+    } catch (e) {
+      setStatus(st, e && e.code === 'declined' ? 'Descarga cancelada.' : 'No se pudo guardar el archivo.', e && e.code === 'declined' ? '' : 'err');
+    }
+    return;
+  }
+  const a = document.createElement('a'); a.href = URL.createObjectURL(blob); a.download = name;
+  document.body.appendChild(a); a.click(); a.remove(); setTimeout(() => URL.revokeObjectURL(a.href), 4000);
+  setStatus(st, 'Archivo descargado.', 'ok');
+});
+})();
+</script>
