@@ -121,6 +121,7 @@ details.tips ul{margin:8px 0 0;padding-left:1.1em;color:var(--muted);display:gri
         <div class="two">
           <label class="check"><input id="invDir" type="checkbox"> Giró a la izquierda</label>
           <label class="check"><input id="fillHoles" type="checkbox" checked> Rellenar huecos</label>
+          <label class="check"><input id="handHeld" type="checkbox" checked> Lo giré a mano (sin plato)</label>
           <label class="field" for="nFrames">Tomas por vuelta <select id="nFrames"><option>24</option><option selected>36</option><option>48</option><option>72</option></select></label>
           <label class="field" for="deg">Grados girados <input id="deg" type="number" min="90" max="720" step="10" value="360"></label>
         </div>
@@ -134,8 +135,8 @@ details.tips ul{margin:8px 0 0;padding-left:1.1em;color:var(--muted);display:gri
             <input id="res" type="range" min="40" max="160" step="8" value="88"></label>
           <label class="field" for="smooth">Suavizado <output id="smoothOut">1</output>
             <input id="smooth" type="range" min="0" max="3" step="1" value="1"></label>
-          <label class="field" for="tol">Tomas malas toleradas <output id="tolOut">1</output>
-            <input id="tol" type="range" min="0" max="4" step="1" value="1"></label>
+          <label class="field" for="tol">Tomas malas toleradas <output id="tolOut">2</output>
+            <input id="tol" type="range" min="0" max="8" step="1" value="2"></label>
           <label class="field" for="realH">Altura real (cm) <input id="realH" type="number" min="1" max="500" step="0.5" value="12"></label>
         </div>
         <div class="row"><button id="btnBuild" class="primary" type="button" disabled>Generar 3D</button></div>
@@ -414,18 +415,23 @@ $('#deg').addEventListener('change', drawPreview);
 /* ---------- tallado por siluetas (visual hull) ---------- */
 async function carve() {
   const N = frames.length, deg = +$('#deg').value, dir = $('#invDir').checked ? -1 : 1;
-  const res = +$('#res').value, tol = +$('#tol').value;
-  const masks = frames.map(f => morph(f.mask, FW, FH, true));   // margen de 1 px
-  let x0 = FW, x1 = -1, y0 = FH, y1 = -1, cxs = 0, cn = 0;
+  const res = +$('#res').value, tol = +$('#tol').value, perFrame = $('#handHeld').checked;
+  const masks = frames.map(f => morph(morph(f.mask, FW, FH, true), FW, FH, true));   // margen de 2 px
+  let y0 = FH, y1 = -1, cn = 0, halfW = 0;
+  const bx = [];
   for (const m of masks) {
     let a = FW, b = -1;
     for (let y = 0; y < FH; y++) for (let x = 0; x < FW; x++) if (m[y * FW + x]) {
       if (x < a) a = x; if (x > b) b = x; if (y < y0) y0 = y; if (y > y1) y1 = y;
     }
-    if (b >= 0) { x0 = Math.min(x0, a); x1 = Math.max(x1, b); cxs += (a + b) / 2; cn++; }
+    bx.push(b >= 0 ? [a, b] : null); if (b >= 0) cn++;
   }
-  if (cn < N * 0.7) throw new Error('En varias tomas no se encontró el objeto. Ajusta la sensibilidad.');
-  const cx = cxs / cn, R = Math.max(cx - x0, x1 - cx) + 2, hgt = y1 - y0 + 1;
+  if (cn < N * 0.7) throw new Error('En varias tomas no se encontró el objeto. Baja la sensibilidad del recorte.');
+  // eje de giro: centro de cada toma (giro a mano) o centro promedio (plato giratorio)
+  const valid = bx.filter(Boolean), meanC = valid.reduce((t, q) => t + (q[0] + q[1]) / 2, 0) / valid.length;
+  const cxf = bx.map(q => perFrame && q ? (q[0] + q[1]) / 2 : meanC);
+  bx.forEach((q, f) => { if (q) halfW = Math.max(halfW, cxf[f] - q[0], q[1] - cxf[f]); });
+  const R = halfW + 2, hgt = y1 - y0 + 1;
   const s = Math.max(2 * R, hgt) / res;
   const nx = Math.ceil(2 * R / s), nz = nx, ny = Math.ceil(hgt / s);
   const miss = new Uint8Array(nx * ny * nz);
@@ -437,27 +443,33 @@ async function carve() {
   for (let f = 0; f < N; f++) {
     const th = dir * (f / N) * deg * Math.PI / 180; thetas.push(th);
     const c = Math.cos(th), sn = Math.sin(th), m = masks[f];
-    for (let i = 0; i < nx; i++) XC[i] = cx + Xs[i] * c;
+    for (let i = 0; i < nx; i++) XC[i] = cxf[f] + Xs[i] * c;
     for (let k = 0; k < nz; k++) ZS[k] = Zs[k] * sn;
     for (let j = 0; j < ny; j++) {
       const py = Math.min(FH - 1, Math.floor(y0 + (j + 0.5) * s)), row = py * FW;
       for (let k = 0; k < nz; k++) {
         const base = (k * ny + j) * nx, zs = ZS[k];
         for (let i = 0; i < nx; i++) {
-          const v = base + i; if (miss[v] > tol) continue;
           const px = (XC[i] + zs) | 0;
-          if (px < 0 || px >= FW || !m[row + px]) miss[v]++;
+          if (px < 0 || px >= FW || !m[row + px]) miss[base + i]++;
         }
       }
     }
     $('#buildBar').style.width = ((f + 1) / N * 70) + '%';
     if (f % 4 === 3) await tick();
   }
-  const occ = new Float32Array(nx * ny * nz); let filled = 0;
-  for (let v = 0; v < occ.length; v++) if (miss[v] <= tol) { occ[v] = 1; filled++; }
-  if (filled < 20) throw new Error('El volumen quedó vacío. Revisa el recorte o activa “Giró a la izquierda”.');
+  // si el volumen queda casi vacío, tolera más tomas malas automáticamente
+  const total = nx * ny * nz, hist = new Uint32Array(256);
+  for (let v = 0; v < total; v++) hist[miss[v]]++;
+  const minFill = Math.max(300, total * 0.03);
+  let k = tol, filled = 0;
+  for (let q = 0; q <= k; q++) filled += hist[q];
+  while (filled < minFill && k < Math.floor(N * 0.5)) { k++; filled += hist[k]; }
+  if (filled < 20) throw new Error('No se pudo formar un volumen: las siluetas no coinciden entre sí. Revisa que el recorte marque solo el objeto en todas las tomas.');
+  const occ = new Float32Array(total);
+  for (let v = 0; v < total; v++) if (miss[v] <= k) occ[v] = 1;
   const map = (gx, gy, gz) => [-R + (gx + 0.5) * s, y0 + (gy + 0.5) * s, -R + (gz + 0.5) * s];
-  return { occ, nx, ny, nz, map, thetas, cx };
+  return { occ, nx, ny, nz, map, thetas, cxf, usedTol: k, autoTol: k > tol };
 }
 
 /* ---------- malla: surface nets ---------- */
@@ -539,7 +551,7 @@ function surfaceNets(vox, sx, sy, sz, smooth, map) {
 }
 
 /* ---------- color desde las tomas ---------- */
-function colorize(m, thetas, cx) {
+function colorize(m, thetas, cxf) {
   const n = m.pos.length / 3, col = new Float32Array(n * 3);
   const dirs = thetas.map(t => [Math.sin(t), -Math.cos(t), Math.cos(t), Math.sin(t)]);
   for (let v = 0; v < n; v++) {
@@ -550,7 +562,7 @@ function colorize(m, thetas, cx) {
       const [s, mc] = dirs[f];
       const w = nx * s + nz * mc; if (w <= 0.15) continue;
       const ww = w * w * w;
-      const px = Math.round(cx + X * dirs[f][2] + Z * dirs[f][3]), py = Math.round(Y);
+      const px = Math.round(cxf[f] + X * dirs[f][2] + Z * dirs[f][3]), py = Math.round(Y);
       if (px < 0 || py < 0 || px >= FW || py >= FH) continue;
       const j = (py * FW + px) * 4, d = frames[f].img.data;
       r += d[j] * ww; g += d[j + 1] * ww; b += d[j + 2] * ww; wsum += ww;
@@ -640,10 +652,10 @@ $('#btnBuild').addEventListener('click', async () => {
     const m = surfaceNets(c.occ, c.nx, c.ny, c.nz, +$('#smooth').value, c.map);
     $('#buildBar').style.width = '85%'; await tick();
     setStatus(st, 'Pintando con el color de las tomas…'); await tick();
-    const col = colorize(m, c.thetas, c.cx);
+    const col = colorize(m, c.thetas, c.cxf);
     showMesh(m, col, `TU ESCANEO · ${frames.length} tomas`, false);
     $('#buildBar').style.width = '100%';
-    setStatus(st, `Listo en ${((performance.now() - t0) / 1000).toFixed(1)} s.`, 'ok');
+    setStatus(st, `Listo en ${((performance.now() - t0) / 1000).toFixed(1)} s.` + (c.autoTol ? ` Las siluetas no cuadraban del todo: se ignoraron hasta ${c.usedTol} tomas por punto.` : ''), 'ok');
   } catch (e) { setStatus(st, e.message || 'Algo falló al generar el modelo.', 'err'); }
   btn.disabled = false;
 });
